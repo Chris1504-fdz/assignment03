@@ -1,0 +1,34 @@
+# large artifacts
+.cache/
+logs_past/
+models_past/
+outputs_past/
+reward_model_past/
+samples_past/
+src/eval_all_policies_print.py
+models/
+logs/
+reward_model/
+
+
+# temp folders from runs
+tmp*/
+torchelastic_*/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# editor
+.vscode/
+logs/
+
+models/
+reward_model/*.pt
+hh_rlhf_*_tokenized/
+eval_outputs/
+logs/
+*.arrow
+*.pt
