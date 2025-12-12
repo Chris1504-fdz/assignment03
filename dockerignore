@@ -1,0 +1,24 @@
+# Keep the Docker build context small and avoid copying huge artifacts
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# VS Code / Jupyter
+.vscode/
+.ipynb_checkpoints/
+
+# Hugging Face caches
+.cache/
+**/.cache/
+
+# Training artifacts (often huge)
+models/
+reward_model/
+eval_outputs/
+
+# Data
+data/
+datasets/

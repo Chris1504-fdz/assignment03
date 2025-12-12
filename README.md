@@ -12,6 +12,52 @@ The code emphasizes reproducibility (fixed seeds, consistent prompt formatting, 
 
 ---
 
+---
+
+## 10. Docker (reproducible run)
+
+This repo includes a `Dockerfile` that runs **evaluation by default** (it executes `python src/eval_all_policies.py`).
+
+### 10.1 Build
+
+From the repo root (same folder as `Dockerfile`):
+
+```bash
+docker build -t assignment03:latest .
+```
+
+Notes:
+- The Docker image copies `reward_model/*.pt` and `models/*.pt` into the image, so evaluation can run immediately.
+- The build context should stay small. The provided `.dockerignore` excludes caches (Hugging Face caches, tokenized datasets, eval outputs, logs).
+
+### 10.2 Run (default = evaluation)
+
+Recommended: mount an output folder so you can retrieve results easily.
+
+run:
+
+```bash
+docker run --rm -v "$(pwd)/models:/workspace/models:ro" -v "$(pwd)/reward_model:/workspace/reward_model:ro" -v "$(pwd)/eval_outputs:/workspace/eval_outputs" assignment03:latest
+```
+
+After it finishes, your artifacts will be in:
+
+- `eval_outputs/<run_id>/summary_table.md` and `summary_table.csv`
+- `eval_outputs/<run_id>/per_prompt_outputs.jsonl`
+- `eval_outputs/<run_id>/samples_qualitative.txt`
+- `eval_outputs/<run_id>/pairwise_human_judge.jsonl`
+
+### 10.3 Run a different script (optional)
+
+You can override the default command, for example:
+
+```bash
+docker run --rm --gpus all assignment03:latest python src/reward/train_reward_model.py
+docker run --rm --gpus all assignment03:latest python src/train_ppo_policy.py
+docker run --rm --gpus all assignment03:latest python src/train_grpo_policy.py
+docker run --rm --gpus all assignment03:latest python src/train_dpo_policy.py
+```
+
 ## 1. Repository structure
 
 Key files:
@@ -229,16 +275,6 @@ Default reproducibility controls:
 
 ---
 
-## 8. Deliverables checklist
-
-- [•] Code for Reward Model, PPO, GRPO, DPO
-- [•] Evaluation script producing quantitative + qualitative artifacts
-- [•] README.md
-- [•] Saved model checkpoints in models/
-- [•] Generated samples + pairwise judge file in eval_outputs/<run_id>/
-
----
-
 ## 9. Quick commands
 
 Reward model:
@@ -265,3 +301,7 @@ Evaluation:
 ```bash
 python src/eval_all_policies.py
 ```
+
+
+
+
