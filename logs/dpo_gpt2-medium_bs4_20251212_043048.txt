@@ -1,0 +1,120 @@
+Logging to: logs/dpo_gpt2-medium_bs4_20251212_043048.txt
+Using device: cuda
+CUDA device count visible: 4
+
+Loading tokenized datasets from disk...
+Original Train size: 144720
+Original Val size:   16080
+Using subset -> Train size: 2000 | Val size: 2000
+
+Initializing policy and reference models...
+Policy: using DataParallel
+Reference: single GPU (frozen)
+Policy param device: cuda:0
+Ref param device: cuda:0
+Total steps: 500, Warmup steps: 50
+
+===== DPO Epoch 1/1 =====
+[Step 5] loss = 0.8904 | pref_acc = 0.7500
+[Step 10] loss = 1.4690 | pref_acc = 0.3500
+[Step 15] loss = 1.2155 | pref_acc = 0.4000
+[Step 20] loss = 0.8882 | pref_acc = 0.5000
+[Step 25] loss = 1.1859 | pref_acc = 0.4000
+[Step 30] loss = 1.0738 | pref_acc = 0.4500
+[Step 35] loss = 1.1003 | pref_acc = 0.5000
+[Step 40] loss = 1.0618 | pref_acc = 0.5000
+[Step 45] loss = 1.0400 | pref_acc = 0.5500
+[Step 50] loss = 0.9729 | pref_acc = 0.5500
+[Step 55] loss = 1.0189 | pref_acc = 0.5000
+[Step 60] loss = 1.4936 | pref_acc = 0.4500
+[Step 65] loss = 0.5984 | pref_acc = 0.4000
+[Step 70] loss = 1.0007 | pref_acc = 0.4000
+[Step 75] loss = 1.3429 | pref_acc = 0.4500
+[Step 80] loss = 0.8075 | pref_acc = 0.4000
+[Step 85] loss = 1.3740 | pref_acc = 0.2000
+[Step 90] loss = 1.0973 | pref_acc = 0.4000
+[Step 95] loss = 0.9633 | pref_acc = 0.6000
+[Step 100] loss = 1.0429 | pref_acc = 0.6000
+[Step 105] loss = 1.3227 | pref_acc = 0.4500
+[Step 110] loss = 1.0520 | pref_acc = 0.7000
+[Step 115] loss = 0.6041 | pref_acc = 0.6500
+[Step 120] loss = 0.8171 | pref_acc = 0.6000
+[Step 125] loss = 1.1104 | pref_acc = 0.5500
+[Step 130] loss = 0.8469 | pref_acc = 0.5500
+[Step 135] loss = 0.7477 | pref_acc = 0.5500
+[Step 140] loss = 0.7199 | pref_acc = 0.7000
+[Step 145] loss = 0.9001 | pref_acc = 0.8000
+[Step 150] loss = 0.8393 | pref_acc = 0.5500
+[Step 155] loss = 0.9656 | pref_acc = 0.3500
+[Step 160] loss = 0.9520 | pref_acc = 0.3500
+[Step 165] loss = 0.8093 | pref_acc = 0.7500
+[Step 170] loss = 0.9008 | pref_acc = 0.5000
+[Step 175] loss = 0.9631 | pref_acc = 0.2500
+[Step 180] loss = 1.1223 | pref_acc = 0.4000
+[Step 185] loss = 0.8681 | pref_acc = 0.6000
+[Step 190] loss = 0.9555 | pref_acc = 0.4000
+[Step 195] loss = 0.8454 | pref_acc = 0.5500
+[Step 200] loss = 1.0446 | pref_acc = 0.7000
+[Step 205] loss = 0.7153 | pref_acc = 0.7500
+[Step 210] loss = 0.6559 | pref_acc = 0.2000
+[Step 215] loss = 0.8698 | pref_acc = 0.5000
+[Step 220] loss = 0.9277 | pref_acc = 0.6000
+[Step 225] loss = 1.0685 | pref_acc = 0.2500
+[Step 230] loss = 0.8837 | pref_acc = 0.4000
+[Step 235] loss = 0.7167 | pref_acc = 0.3500
+[Step 240] loss = 1.2283 | pref_acc = 0.3000
+[Step 245] loss = 1.1372 | pref_acc = 0.5000
+[Step 250] loss = 0.7897 | pref_acc = 0.3000
+[Step 255] loss = 1.0016 | pref_acc = 0.5000
+[Step 260] loss = 0.7427 | pref_acc = 0.4500
+[Step 265] loss = 0.9738 | pref_acc = 0.7500
+[Step 270] loss = 0.7902 | pref_acc = 0.5000
+[Step 275] loss = 1.0880 | pref_acc = 0.3000
+[Step 280] loss = 0.6655 | pref_acc = 0.4000
+[Step 285] loss = 0.8930 | pref_acc = 0.6000
+[Step 290] loss = 0.7289 | pref_acc = 0.6500
+[Step 295] loss = 1.0693 | pref_acc = 0.5000
+[Step 300] loss = 0.6401 | pref_acc = 0.5000
+[Step 305] loss = 0.9999 | pref_acc = 0.4000
+[Step 310] loss = 0.9058 | pref_acc = 0.4500
+[Step 315] loss = 0.8547 | pref_acc = 0.7500
+[Step 320] loss = 0.9139 | pref_acc = 0.2500
+[Step 325] loss = 0.7749 | pref_acc = 0.4500
+[Step 330] loss = 0.6943 | pref_acc = 0.5500
+[Step 335] loss = 0.8670 | pref_acc = 0.5000
+[Step 340] loss = 0.9556 | pref_acc = 0.5000
+[Step 345] loss = 0.7184 | pref_acc = 0.4000
+[Step 350] loss = 0.8641 | pref_acc = 0.5500
+[Step 355] loss = 0.9476 | pref_acc = 0.3500
+[Step 360] loss = 0.7458 | pref_acc = 0.3000
+[Step 365] loss = 0.8256 | pref_acc = 0.4000
+[Step 370] loss = 1.1225 | pref_acc = 0.4000
+[Step 375] loss = 1.1360 | pref_acc = 0.4000
+[Step 380] loss = 0.7710 | pref_acc = 0.4000
+[Step 385] loss = 0.8921 | pref_acc = 0.6000
+[Step 390] loss = 0.8400 | pref_acc = 0.2500
+[Step 395] loss = 1.0657 | pref_acc = 0.4000
+[Step 400] loss = 0.7216 | pref_acc = 0.5500
+[Step 405] loss = 0.6931 | pref_acc = 0.6500
+[Step 410] loss = 0.6562 | pref_acc = 0.6500
+[Step 415] loss = 0.8511 | pref_acc = 0.6000
+[Step 420] loss = 0.7860 | pref_acc = 0.4500
+[Step 425] loss = 0.8928 | pref_acc = 0.3500
+[Step 430] loss = 0.7129 | pref_acc = 0.6500
+[Step 435] loss = 0.7735 | pref_acc = 0.5500
+[Step 440] loss = 0.6548 | pref_acc = 0.2500
+[Step 445] loss = 0.9450 | pref_acc = 0.7000
+[Step 450] loss = 1.0025 | pref_acc = 0.5000
+[Step 455] loss = 0.8522 | pref_acc = 0.4500
+[Step 460] loss = 0.7284 | pref_acc = 0.6000
+[Step 465] loss = 0.7755 | pref_acc = 0.3500
+[Step 470] loss = 0.9552 | pref_acc = 0.4500
+[Step 475] loss = 0.7273 | pref_acc = 0.4500
+[Step 480] loss = 0.8293 | pref_acc = 0.5500
+[Step 485] loss = 1.0480 | pref_acc = 0.4500
+[Step 490] loss = 0.5791 | pref_acc = 0.5500
+[Step 495] loss = 1.1248 | pref_acc = 0.5000
+[Step 500] loss = 1.0718 | pref_acc = 0.2500
+
+[Epoch 1] Val loss = 0.7511 | Val pref_acc = 0.4815 | Ref pref_acc = 0.4845
+Saved DPO policy checkpoint: models/dpo_policy_epoch1.pt

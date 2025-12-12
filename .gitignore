@@ -6,8 +6,6 @@ outputs_past/
 reward_model_past/
 samples_past/
 src/eval_all_policies_print.py
-models/
-logs/
 reward_model/
 
 
@@ -23,12 +21,10 @@ __pycache__/
 
 # editor
 .vscode/
-logs/
 
 models/
 reward_model/*.pt
 hh_rlhf_*_tokenized/
 eval_outputs/
-logs/
 *.arrow
 *.pt
