@@ -414,7 +414,7 @@ def main():
 
     # Reward model: auto-infer backbone
     vprint("\n[reward] Loading reward checkpoint and inferring backbone...")
-    state = torch.load(REWARD_CHECKPOINT, map_location="cpu")
+    state = torch.load(REWARD_CHECKPOINT, map_location="cpu", weights_only=False)
     reward_backbone = infer_reward_backbone_from_state_dict(state)
     vprint(f"[reward] inferred backbone='{reward_backbone}'")
 
@@ -424,7 +424,7 @@ def main():
         reward_tok.pad_token = reward_tok.eos_token
 
     reward_model = GPT2RewardModel(reward_backbone).to(DEVICE)
-    reward_model.load_state_dict(torch.load(REWARD_CHECKPOINT, map_location=DEVICE))
+    reward_model.load_state_dict(torch.load(REWARD_CHECKPOINT, map_location=DEVICE, weights_only=False))
     reward_model.eval()
     vprint("[reward] reward model loaded")
 
@@ -448,7 +448,7 @@ def main():
     if ppo_ckpt:
         vprint("[models] Loading PPO checkpoint...")
         ppo_model = AutoModelForCausalLM.from_pretrained(BASE_BACKBONE).to(DEVICE)
-        ppo_model.load_state_dict(torch.load(ppo_ckpt, map_location=DEVICE))
+        ppo_model.load_state_dict(torch.load(ppo_ckpt, map_location=DEVICE, weights_only=False))
         runs.append(ModelRun(
             name="PPO",
             backbone=BASE_BACKBONE,
@@ -461,7 +461,7 @@ def main():
     if grpo_ckpt:
         vprint("[models] Loading GRPO checkpoint...")
         grpo_model = AutoModelForCausalLM.from_pretrained(BASE_BACKBONE).to(DEVICE)
-        grpo_model.load_state_dict(torch.load(grpo_ckpt, map_location=DEVICE))
+        grpo_model.load_state_dict(torch.load(grpo_ckpt, map_location=DEVICE, weights_only=False))
         runs.append(ModelRun(
             name="GRPO",
             backbone=BASE_BACKBONE,
@@ -474,7 +474,7 @@ def main():
     if dpo_ckpt:
         vprint("[models] Loading DPO checkpoint...")
         dpo_model = AutoModelForCausalLM.from_pretrained(DPO_BACKBONE).to(DEVICE)
-        dpo_model.load_state_dict(torch.load(dpo_ckpt, map_location=DEVICE))
+        dpo_model.load_state_dict(torch.load(dpo_ckpt, map_location=DEVICE), weights_only=False)
         runs.append(ModelRun(
             name="DPO",
             backbone=DPO_BACKBONE,
