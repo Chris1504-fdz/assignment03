@@ -397,3 +397,17 @@ To keep qualitative analysis systematic (rather than anecdotal), all models are 
 - identical evaluation format.
 
 The goal is to cover known RLHF failure modes and provide principled evidence that complements the quantitative results (Section 5).
+
+
+####
+
+> **Note on large files (Git LFS)**
+>
+> This repository uses **Git Large File Storage (Git LFS)** to version and share large artifacts such as:
+> - tokenized dataset shards (`*.arrow`)
+> - model checkpoints (`*.pt`)
+>
+> These files exceed GitHub’s normal 100 MB limit, so the GitHub repo stores **small pointer files** by default, and `git lfs pull` downloads the *real* content.
+>
+
+Docker image is designed to run evaluation by mounting the `models/` and `reward_model/` folders from the host (or after you have pulled them via LFS on the host).
