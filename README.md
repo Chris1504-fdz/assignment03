@@ -15,6 +15,17 @@ The code emphasizes reproducibility (fixed seeds, consistent prompt formatting, 
 ---
 
 ## 10. Docker (reproducible run)
+```bash
+git clone git@github.com:Chris1504-fdz/assignment03.git
+
+cd assignment03
+# 3) Initialize LFS (one-time per machine)
+git lfs install
+
+# 4) Pull the actual large files (models, .pt checkpoints, etc.)
+git lfs pull
+```
+
 
 This repo includes a `Dockerfile` that runs **evaluation by default** (it executes `python src/eval_all_policies.py`).
 
