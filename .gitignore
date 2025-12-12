@@ -24,7 +24,6 @@ __pycache__/
 
 models/
 reward_model/*.pt
-hh_rlhf_*_tokenized/
 eval_outputs/
 *.arrow
 *.pt
