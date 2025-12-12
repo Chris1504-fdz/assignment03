@@ -1,50 +1,44 @@
 """
-eval_all_policies.py
+eval_all_policies.py (verbose)
 
 Evaluates:
   - BASE (pretrained)
-  - PPO checkpoint
-  - GRPO checkpoint
-  - DPO checkpoint (optionally different backbone)
+  - PPO checkpoint (latest)
+  - GRPO checkpoint (latest)
+  - DPO checkpoint (latest, optionally different backbone)
 
 Outputs (saved to eval_outputs/<run_id>/):
   - summary_table.md + summary_table.csv
-  - per_prompt_outputs.jsonl (prompt + completion + reward + KL + lengths per model)
-  - samples_qualitative.txt (around 20 prompts, prompt question only + completion only)
-  - pairwise_human_judge.jsonl (100+ prompts, BASE vs each model, for human labeling)
-
-Notes vs assignment:
-  - Reward model scores: we compute per-prompt reward scores and save raw distributions.
-  - KL divergence: estimated on response tokens only (sampled KL proxy).
-  - Win rate vs reference: we SAVE pairwise outputs on 200 prompts for human judging.
-    (Reward-proxy win rate is also computed, but do not claim it satisfies GPT-4-as-judge.)
+  - per_prompt_outputs.jsonl
+  - samples_qualitative.txt
+  - pairwise_human_judge.jsonl
 """
 
 import os
 import re
 import glob
 import json
-import math
 import random
 import csv
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 
 import torch
 import torch.nn as nn
 from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModel
 
+
 # ----------------- config -----------------
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 BASE_BACKBONE = "gpt2-medium"
-DPO_BACKBONE = "gpt2-medium"  
+DPO_BACKBONE = "gpt2-medium"
 REWARD_CHECKPOINT = "reward_model/gpt2_reward_model.pt"
 
-PPO_PATTERN = "models/ppo_policy_epoch*.pt"
+PPO_PATTERN = "models/ppo_policy*.pt"
 GRPO_PATTERN = "models/grpo_policy_epoch*.pt"
 DPO_PATTERN = "models/dpo_policy_epoch*.pt"
 
@@ -53,26 +47,28 @@ MAX_GEN_LEN = 64
 
 EVAL_SPLIT = "test"          # fallback to 'train' if split not found
 NUM_EVAL_PROMPTS = 200       # metrics evaluation
-EVAL_BATCH_SIZE = 8
+EVAL_BATCH_SIZE = 12
 
-# Required by assignment: 100+ prompts for win-rate judging.
-# We save 200 by default to be safe.
-NUM_JUDGE_PROMPTS = 200
+NUM_JUDGE_PROMPTS = 200      # for human judging file
 
 TOP_P = 0.9
 TEMPERATURE = 1.0
 SEED = 42
 
-# Assignment says ~20 examples per model
 NUM_SHOW_EXAMPLES = 20
-
 OUT_ROOT = "eval_outputs"
 
-# If True, also compute a reward-proxy win rate (not a replacement for human/GPT judge)
 COMPUTE_REWARD_PROXY_WINRATE = True
 
+VERBOSE = True
+PRINT_EVERY_BATCH = 5  # during generate_and_score
 
-# ----------------- small IO helpers -----------------
+
+# ----------------- small helpers -----------------
+
+def vprint(msg: str):
+    if VERBOSE:
+        print(msg, flush=True)
 
 def set_seed(seed: int):
     random.seed(seed)
@@ -86,20 +82,26 @@ def now_id() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 def dump_jsonl(path: str, rows: List[dict]):
+    ensure_dir(os.path.dirname(path))
     with open(path, "w", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    vprint(f"[write] jsonl -> {path}  (rows={len(rows)})")
 
 def write_text(path: str, text: str):
+    ensure_dir(os.path.dirname(path))
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
+    vprint(f"[write] text -> {path}  (chars={len(text)})")
 
 def write_csv(path: str, header: List[str], rows: List[List]):
+    ensure_dir(os.path.dirname(path))
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(header)
         for r in rows:
             w.writerow(r)
+    vprint(f"[write] csv -> {path}  (rows={len(rows)})")
 
 def list_checkpoints(pattern: str) -> List[str]:
     paths = glob.glob(pattern)
@@ -121,13 +123,8 @@ def get_latest_checkpoint(pattern: str) -> Optional[str]:
 # ----------------- prompt cleaning -----------------
 
 def extract_first_human_turn(raw_prompt: str) -> str:
-    """
-    Keep ONLY the first Human turn content, drop everything after the first Assistant tag.
-    Returns the full first Human content (possibly multi-line).
-    """
     if raw_prompt is None:
         return ""
-
     parts = re.split(r"\n\s*Assistant\s*:\s*", raw_prompt, maxsplit=1)
     first_chunk = parts[0].strip()
     first_chunk = re.sub(r"^\s*Human\s*:\s*", "", first_chunk).strip()
@@ -135,27 +132,13 @@ def extract_first_human_turn(raw_prompt: str) -> str:
     return first_chunk
 
 def display_first_line(text: str) -> str:
-    """
-    For display only: keep just the first line-like segment.
-    """
-    if not text:
-        return ""
-    # If there is a literal newline in the original, prefer the first segment
-    # Otherwise keep full.
-    # Since extract_first_human_turn already collapses whitespace, we just return it.
-    return text.strip()
+    return (text or "").strip()
 
 def format_hh_prompt(question: str) -> str:
-    """
-    Turn question into a clean HH-style prompt for generation.
-    """
     question = question.strip()
     return f"Human: {question}\n\nAssistant:"
 
 def truncate_at_next_human(text: str) -> str:
-    """
-    If model starts writing the next turn ("Human:"), cut it for cleaner display.
-    """
     idx = text.find("Human:")
     if idx == -1:
         return text.strip()
@@ -165,10 +148,6 @@ def truncate_at_next_human(text: str) -> str:
 # ----------------- reward model -----------------
 
 class GPT2RewardModel(nn.Module):
-    """
-    Encoder + linear head producing a scalar reward.
-    The backbone must match the checkpoint.
-    """
     def __init__(self, model_name: str):
         super().__init__()
         self.base_model = AutoModel.from_pretrained(model_name)
@@ -188,13 +167,8 @@ class GPT2RewardModel(nn.Module):
         return rewards
 
 def infer_reward_backbone_from_state_dict(state: dict) -> str:
-    """
-    Infer GPT-2 family size from value_head weight shape.
-    gpt2 hidden=768, gpt2-medium hidden=1024, gpt2-large hidden=1280, gpt2-xl hidden=1600
-    """
     if "value_head.weight" not in state:
         raise ValueError("Checkpoint missing value_head.weight; cannot infer reward backbone.")
-
     hidden = int(state["value_head.weight"].shape[1])
     mapping = {
         768: "gpt2",
@@ -203,7 +177,7 @@ def infer_reward_backbone_from_state_dict(state: dict) -> str:
         1600: "gpt2-xl",
     }
     if hidden not in mapping:
-        raise ValueError(f"Unknown reward hidden size {hidden}; update mapping in infer_reward_backbone_from_state_dict().")
+        raise ValueError(f"Unknown reward hidden size {hidden}; update mapping.")
     return mapping[hidden]
 
 
@@ -215,32 +189,23 @@ def token_logprobs_for_sequences(
     input_ids: torch.Tensor,
     attention_mask: torch.Tensor,
 ) -> torch.Tensor:
-    """
-    Returns token logprobs for each next-token target:
-      log p(x_t | x_<t)
-    Shape: [B, T-1]
-    """
     out = model(input_ids=input_ids, attention_mask=attention_mask)
     logits = out.logits  # [B, T, V]
-    logp = torch.log_softmax(logits, dim=-1)  # [B, T, V]
+    logp = torch.log_softmax(logits, dim=-1)
 
-    targets = input_ids[:, 1:]               # [B, T-1]
-    logp = logp[:, :-1, :]                   # [B, T-1, V]
-    token_logp = logp.gather(dim=-1, index=targets.unsqueeze(-1)).squeeze(-1)  # [B, T-1]
+    targets = input_ids[:, 1:]
+    logp = logp[:, :-1, :]
+    token_logp = logp.gather(dim=-1, index=targets.unsqueeze(-1)).squeeze(-1)
     return token_logp
 
 def response_token_mask_from_prompt(attn_prompt: torch.Tensor, attn_full: torch.Tensor) -> torch.Tensor:
-    """
-    Build a [B, T-1] mask selecting ONLY response tokens (targets) in the full sequence.
-    Prompt lengths are attention sums, assumes left padding.
-    """
     B, T_full = attn_full.size()
-    prompt_lens = attn_prompt.sum(dim=1).long()  # [B]
+    prompt_lens = attn_prompt.sum(dim=1).long()
     mask = torch.zeros((B, T_full - 1), device=attn_full.device, dtype=torch.float32)
 
     for b in range(B):
         pl = int(prompt_lens[b].item())
-        start_t = max(pl - 1, 0)  # in token_logprobs space
+        start_t = max(pl - 1, 0)
         valid_t = attn_full[b, 1:].float()
         m = torch.zeros_like(valid_t)
         m[start_t:] = 1.0
@@ -252,17 +217,22 @@ def response_token_mask_from_prompt(attn_prompt: torch.Tensor, attn_full: torch.
 # ----------------- data loading -----------------
 
 def load_eval_questions(n_prompts: int) -> List[str]:
+    split_used = None
     try:
         ds = load_dataset("Anthropic/hh-rlhf", split=EVAL_SPLIT)
+        split_used = EVAL_SPLIT
     except Exception:
         ds = load_dataset("Anthropic/hh-rlhf", split="train")
+        split_used = "train"
 
     raw_prompts = ds["prompt"] if "prompt" in ds.column_names else ds["chosen"]
+
     if len(raw_prompts) > n_prompts:
         idx = random.sample(range(len(raw_prompts)), n_prompts)
         raw_prompts = [raw_prompts[i] for i in idx]
 
     questions = [extract_first_human_turn(p) for p in raw_prompts]
+    vprint(f"[data] Loaded {len(questions)} prompts from split='{split_used}'")
     return questions
 
 
@@ -284,21 +254,17 @@ def generate_and_score(
     reward_tokenizer: AutoTokenizer,
     questions: List[str],
 ) -> List[dict]:
-    """
-    For each question:
-      - generate completion (completion-only)
-      - compute reward score on full decoded sequence
-      - compute sampled KL on response tokens only
-      - compute lengths (prompt len, response len, total len)
-    Returns list[dict] per prompt.
-    """
     run.model.eval()
     run.ref_model.eval()
     reward_model.eval()
 
-    rows: List[dict] = []
+    vprint(f"\n[eval] Model={run.name} | backbone={run.backbone} | ckpt={run.checkpoint}")
+    vprint(f"[eval] Prompts={len(questions)} | batch_size={EVAL_BATCH_SIZE} | max_prompt_len={MAX_PROMPT_LEN} | max_gen_len={MAX_GEN_LEN}")
 
-    for start in range(0, len(questions), EVAL_BATCH_SIZE):
+    rows: List[dict] = []
+    n_batches = (len(questions) + EVAL_BATCH_SIZE - 1) // EVAL_BATCH_SIZE
+
+    for bidx, start in enumerate(range(0, len(questions), EVAL_BATCH_SIZE), start=1):
         batch_q = questions[start:start + EVAL_BATCH_SIZE]
         batch_prompts = [format_hh_prompt(q) for q in batch_q]
 
@@ -346,7 +312,6 @@ def generate_and_score(
         r_attn = r_enc["attention_mask"].to(DEVICE)
         rewards = reward_model(r_input_ids, r_attn)
 
-        # build completion-only strings and lengths
         prompt_lens = attn_prompt.sum(dim=1).tolist()
         total_lens = attn_full.sum(dim=1).tolist()
 
@@ -373,7 +338,12 @@ def generate_and_score(
                 "total_len_tokens": tl,
             })
 
+        if (bidx % PRINT_EVERY_BATCH == 0) or (bidx == 1) or (bidx == n_batches):
+            vprint(f"[eval] {run.name}: batch {bidx}/{n_batches} done (rows={len(rows)})")
+
+    vprint(f"[eval] Done {run.name}: collected rows={len(rows)}")
     return rows
+
 
 def summarize(rows: List[dict]) -> Dict[str, float]:
     r = torch.tensor([x["reward"] for x in rows], dtype=torch.float32)
@@ -390,7 +360,6 @@ def summarize(rows: List[dict]) -> Dict[str, float]:
     }
 
 def reward_proxy_winrate(model_rows: List[dict], base_rows: List[dict]) -> float:
-    # assumes aligned by prompt order
     wins = 0
     for a, b in zip(model_rows, base_rows):
         if a["reward"] > b["reward"]:
@@ -403,17 +372,36 @@ def reward_proxy_winrate(model_rows: List[dict], base_rows: List[dict]) -> float
 def main():
     set_seed(SEED)
 
+    vprint("=" * 80)
+    vprint(f"[start] eval_all_policies.py | device={DEVICE}")
+    vprint(f"[start] seed={SEED} | top_p={TOP_P} | temp={TEMPERATURE}")
+    vprint(f"[start] base_backbone={BASE_BACKBONE} | dpo_backbone={DPO_BACKBONE}")
+    vprint(f"[start] reward_ckpt={REWARD_CHECKPOINT}")
+    vprint("=" * 80)
+
     run_id = now_id()
     out_dir = os.path.join(OUT_ROOT, run_id)
     ensure_dir(out_dir)
+    vprint(f"[io] output_dir={out_dir}")
+
+    # Checkpoints discovery
+    vprint("\n[ckpt] Searching checkpoints:")
+    ppo_ckpt = get_latest_checkpoint(PPO_PATTERN)
+    grpo_ckpt = get_latest_checkpoint(GRPO_PATTERN)
+    dpo_ckpt = get_latest_checkpoint(DPO_PATTERN)
+    vprint(f"[ckpt] PPO pattern='{PPO_PATTERN}' -> {ppo_ckpt or 'NONE'}")
+    vprint(f"[ckpt] GRPO pattern='{GRPO_PATTERN}' -> {grpo_ckpt or 'NONE'}")
+    vprint(f"[ckpt] DPO pattern='{DPO_PATTERN}' -> {dpo_ckpt or 'NONE'}")
 
     # Load evaluation prompts
+    vprint("\n[data] Loading evaluation prompts...")
     eval_questions = load_eval_questions(NUM_EVAL_PROMPTS)
 
-    # Load judge prompts (for human win-rate labeling file)
+    vprint("[data] Loading judge prompts (for human labeling file)...")
     judge_questions = load_eval_questions(NUM_JUDGE_PROMPTS)
 
     # Tokenizers
+    vprint("\n[tokenizer] Loading tokenizers...")
     base_tok = AutoTokenizer.from_pretrained(BASE_BACKBONE)
     base_tok.padding_side = "left"
     if base_tok.pad_token is None:
@@ -425,8 +413,10 @@ def main():
         dpo_tok.pad_token = dpo_tok.eos_token
 
     # Reward model: auto-infer backbone
+    vprint("\n[reward] Loading reward checkpoint and inferring backbone...")
     state = torch.load(REWARD_CHECKPOINT, map_location="cpu")
     reward_backbone = infer_reward_backbone_from_state_dict(state)
+    vprint(f"[reward] inferred backbone='{reward_backbone}'")
 
     reward_tok = AutoTokenizer.from_pretrained(reward_backbone)
     reward_tok.padding_side = "left"
@@ -436,17 +426,15 @@ def main():
     reward_model = GPT2RewardModel(reward_backbone).to(DEVICE)
     reward_model.load_state_dict(torch.load(REWARD_CHECKPOINT, map_location=DEVICE))
     reward_model.eval()
+    vprint("[reward] reward model loaded")
 
     # Load base + refs
+    vprint("\n[models] Loading base / refs...")
     base_model = AutoModelForCausalLM.from_pretrained(BASE_BACKBONE).to(DEVICE)
     base_ref = AutoModelForCausalLM.from_pretrained(BASE_BACKBONE).to(DEVICE)
     dpo_ref = AutoModelForCausalLM.from_pretrained(DPO_BACKBONE).to(DEVICE)
 
-    # Load checkpoints (latest only by default)
-    ppo_ckpt = get_latest_checkpoint(PPO_PATTERN)
-    grpo_ckpt = get_latest_checkpoint(GRPO_PATTERN)
-    dpo_ckpt = get_latest_checkpoint(DPO_PATTERN)
-
+    # Runs list
     runs: List[ModelRun] = []
     runs.append(ModelRun(
         name="BASE",
@@ -458,6 +446,7 @@ def main():
     ))
 
     if ppo_ckpt:
+        vprint("[models] Loading PPO checkpoint...")
         ppo_model = AutoModelForCausalLM.from_pretrained(BASE_BACKBONE).to(DEVICE)
         ppo_model.load_state_dict(torch.load(ppo_ckpt, map_location=DEVICE))
         runs.append(ModelRun(
@@ -470,6 +459,7 @@ def main():
         ))
 
     if grpo_ckpt:
+        vprint("[models] Loading GRPO checkpoint...")
         grpo_model = AutoModelForCausalLM.from_pretrained(BASE_BACKBONE).to(DEVICE)
         grpo_model.load_state_dict(torch.load(grpo_ckpt, map_location=DEVICE))
         runs.append(ModelRun(
@@ -482,6 +472,7 @@ def main():
         ))
 
     if dpo_ckpt:
+        vprint("[models] Loading DPO checkpoint...")
         dpo_model = AutoModelForCausalLM.from_pretrained(DPO_BACKBONE).to(DEVICE)
         dpo_model.load_state_dict(torch.load(dpo_ckpt, map_location=DEVICE))
         runs.append(ModelRun(
@@ -493,20 +484,27 @@ def main():
             ref_model=dpo_ref,
         ))
 
+    vprint("\n[plan] Models to evaluate:")
+    for r in runs:
+        vprint(f"  - {r.name:4s} | backbone={r.backbone:10s} | ckpt={r.checkpoint}")
+
     # Evaluate metrics on eval_questions
+    vprint("\n[run] Evaluating metrics on eval_questions...")
     all_rows_by_model: Dict[str, List[dict]] = {}
     for run in runs:
         rows = generate_and_score(run, reward_model, reward_tok, eval_questions)
         all_rows_by_model[run.name] = rows
 
     # Save per-prompt outputs
+    vprint("\n[save] Writing per-prompt outputs...")
     per_prompt_path = os.path.join(out_dir, "per_prompt_outputs.jsonl")
     merged_rows: List[dict] = []
-    for m, rows in all_rows_by_model.items():
+    for _, rows in all_rows_by_model.items():
         merged_rows.extend(rows)
     dump_jsonl(per_prompt_path, merged_rows)
 
     # Summary table
+    vprint("\n[summary] Computing summary table...")
     summary_rows = []
     base_rows = all_rows_by_model["BASE"]
 
@@ -516,10 +514,7 @@ def main():
 
         win = None
         if COMPUTE_REWARD_PROXY_WINRATE:
-            if run.name == "BASE":
-                win = 0.5
-            else:
-                win = reward_proxy_winrate(rows, base_rows)
+            win = 0.5 if run.name == "BASE" else reward_proxy_winrate(rows, base_rows)
 
         summary_rows.append({
             "Model": run.name,
@@ -533,7 +528,6 @@ def main():
             "WinRate vs BASE (reward-proxy)": win,
         })
 
-    # Write markdown + CSV
     md_lines = []
     md_lines.append("| Model | Checkpoint | Backbone | Mean reward | Std reward | Mean KL | Std KL | Mean length | WinRate vs BASE (reward-proxy) |")
     md_lines.append("|---|---|---:|---:|---:|---:|---:|---:|---:|")
@@ -565,12 +559,11 @@ def main():
         ])
     write_csv(os.path.join(out_dir, "summary_table.csv"), csv_header, csv_rows)
 
-    # Qualitative examples (20 prompts), saved to file
+    # Qualitative examples file (do not print to terminal)
+    vprint("\n[qual] Writing qualitative samples...")
     n_show = min(NUM_SHOW_EXAMPLES, len(eval_questions))
     sample_questions = eval_questions[:n_show]
 
-    # Build fast lookup: model -> list of rows aligned with eval_questions order
-    # Since generate_and_score appends in order, alignment holds.
     qualitative_lines = []
     for i in range(n_show):
         q_disp = display_first_line(sample_questions[i])
@@ -580,21 +573,17 @@ def main():
         qualitative_lines.append("PROMPT:")
         qualitative_lines.append(q_disp)
         qualitative_lines.append("")
-
         for run in runs:
             row = all_rows_by_model[run.name][i]
             qualitative_lines.append(f"[{run.name}]")
             qualitative_lines.append(row["completion"] if row["completion"] else "(empty)")
             qualitative_lines.append("")
-
     write_text(os.path.join(out_dir, "samples_qualitative.txt"), "\n".join(qualitative_lines) + "\n")
 
-    # Pairwise human judging file for win rate vs BASE (200+ prompts)
-    # For each prompt: save BASE completion and each model completion (separately)
-    # You (human) can label winner in the JSONL later.
+    # Pairwise human judging file
+    vprint("\n[judge] Regenerating completions for human judging set...")
     judge_rows_by_model: Dict[str, List[dict]] = {}
     for run in runs:
-        # regenerate on judge_questions so judging uses 100+ prompts independent of metrics run
         judge_rows_by_model[run.name] = generate_and_score(run, reward_model, reward_tok, judge_questions)
 
     pairwise = []
@@ -610,20 +599,21 @@ def main():
                 "model": run.name,
                 "base_completion": base_comp,
                 "model_completion": model_comp,
-                # fill this manually later: "winner": "BASE" or run.name
                 "winner": None,
             })
-
     dump_jsonl(os.path.join(out_dir, "pairwise_human_judge.jsonl"), pairwise)
 
-    # Print a short run summary to terminal
-    print(f"\nSaved evaluation artifacts to: {out_dir}")
-    print(f"- summary_table.md / summary_table.csv")
-    print(f"- per_prompt_outputs.jsonl")
-    print(f"- samples_qualitative.txt (NUM_SHOW_EXAMPLES={NUM_SHOW_EXAMPLES})")
-    print(f"- pairwise_human_judge.jsonl (NUM_JUDGE_PROMPTS={NUM_JUDGE_PROMPTS})")
+    # Final terminal summary (keep it short but includes the table)
+    vprint("\n" + "=" * 80)
+    vprint(f"[done] Saved evaluation artifacts to: {out_dir}")
+    vprint(f"  - summary_table.md / summary_table.csv")
+    vprint(f"  - per_prompt_outputs.jsonl")
+    vprint(f"  - samples_qualitative.txt (NUM_SHOW_EXAMPLES={NUM_SHOW_EXAMPLES})")
+    vprint(f"  - pairwise_human_judge.jsonl (NUM_JUDGE_PROMPTS={NUM_JUDGE_PROMPTS})")
+    vprint("=" * 80)
     print("\nMarkdown table:\n")
     print(summary_md)
+
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,16 @@
+.git
+__pycache__/
+*.pyc
+
+# Large artifacts
+models/
+reward_model/
+eval_outputs/
+*.pt
+*.bin
+
+# HF / datasets caches (if you have them in repo)
+.cache/
+data/
+wandb/
+runs/
